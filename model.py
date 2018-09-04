@@ -14,7 +14,8 @@ class CompleteModel(object):
             self.test = LoadData(tedir, train=False)
             self.test.filterf(listi)
         else:
-            self.test = self.train
+            self.test = LoadData(trdir, train=False)
+            self.test.filterf(['gaga'])
         self.ranker = None
         self.selected = None
         self.dimreducer = None
@@ -44,7 +45,7 @@ class CompleteModel(object):
             
     def predict(self):
         X = self.dimreducer.transformPCA(self.test.feats[self.selected])
-        return self.model.predict(X)[0]
+        return self.model.predict(X)
         
     def makeCVSimulations(self, *args, n_sims=100, frac_test=0.25, **kwargs):
         train = self.train.feats.copy()
@@ -52,15 +53,25 @@ class CompleteModel(object):
         target = self.train.target.copy()
         scores = pd.Series()
         rocs = pd.DataFrame()
+        
         for i in tqdm(range(n_sims)):
+            del self.train.feats
+            del self.test.feats
+            del self.train.target
             sample = train.sample(frac=1-frac_test, replace=False)
             self.test.feats = train.loc[~train.index.isin(sample.index)]
-            self.train.feats = sample
             self.train.target = target.loc[sample.index]
+            self.train.feats = sample
+            print(self.train.feats.shape[0], self.test.feats.shape[0])
             self.train_model(*args, **kwargs)
-            preds = self.predict()
-            scores.loc[i] = roc_auc_score(self.train.target.loc[sample.index], preds)
-            rocs[i] = roc_curve(self.train.target.loc[sample.index], preds)
+            preds = self.predict()[0]
+            scores.loc[i] = roc_auc_score(target.loc[self.test.feats.index], preds)
+            rocs[i] = roc_curve(target.loc[self.test.feats.index], preds)
+        self.trf = self.train.feats
+        self.tef = self.test.feats
+        self.train.feats = train
+        self.test.feats = test
+        self.train.target = target
         return scores, rocs
         
         
