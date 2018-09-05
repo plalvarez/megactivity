@@ -4,7 +4,7 @@ import pandas as pd
 from scipy.spatial.distance import squareform
 
 tf.logging.set_verbosity(tf.logging.INFO)
-
+prob_dropout = 0.3
 def DropNet(features, labels, mode):
 #This function defines our CNN structure.
 
@@ -17,7 +17,7 @@ def DropNet(features, labels, mode):
                              kernel_size=5, 
                              padding="same", 
                              activation=tf.nn.relu) # Same size, because no stride and padding same
-    dropout1 = tf.layers.dropout(inputs=conv1, rate=0.5, training=True) #dropout layer
+    dropout1 = tf.layers.dropout(inputs=conv1, rate=prob_dropout, training=True) #dropout layer
     pool1 = tf.nn.avg_pool(dropout1, [1, 3, 3, 1], [1, 3, 3, 1], "VALID" ) #avgpool layer
     #output size now [batch size, 34, 34, 20] 
 
@@ -28,19 +28,16 @@ def DropNet(features, labels, mode):
                              padding="same",
                              activation=tf.nn.relu)
     #output size: [batch size, 34, 34, 10]
-    dropout2 = tf.layers.dropout(inputs=conv2, rate=0.5, training=True)
+    dropout2 = tf.layers.dropout(inputs=conv2, rate=prob_dropout, training=True)
     pool2 = tf.nn.avg_pool(dropout2, [1, 2, 2, 1], [1, 2, 2, 1], "VALID" )
     #output size [batch size, 17, 17, 10]
 
     # Dense Layer
     pool2_flat = tf.reshape(pool2, [-1, 17*17*10])
-    dense1 = tf.layers.dense(inputs=pool2_flat, units=100, activation=tf.nn.relu) #this is our fully connected layer
-    
-    dropout3 = tf.layers.dropout(inputs=dense1, rate=0.5, training=True) 
-    dense2 = tf.layers.dense(inputs=dropout3, units=20, activation=tf.nn.relu) #this is our fully connected layer
-    dropout4 = tf.layers.dropout(inputs=dense2, rate=0.5, training=True) 
+    dense1 = tf.layers.dense(inputs=pool2_flat, units=50, activation=tf.nn.relu) #this is our fully connected layer
+    dropout3 = tf.layers.dropout(inputs=dense1, rate=prob_dropout, training=True) 
     # Logits Layer
-    logits = tf.layers.dense(inputs=dropout4, units=2) 
+    logits = tf.layers.dense(inputs=dropout3, units=2) 
 
     #create dictionary with our predictions, and then return it as an EstimatorSpec with appropriate information
     predictions = {
@@ -66,7 +63,7 @@ def DropNet(features, labels, mode):
         return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
 
     # Add evaluation metrics (for EVAL mode)
-    eval_metric_ops = {"accuracy": tf.metrics.accuracy(labels=labels, predictions=predictions["classes"])}
+    eval_metric_ops = {"accuracy": tf.metrics.auc(labels=labels, predictions=predictions["classes"])}
     return tf.estimator.EstimatorSpec(mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
 
 #Now having defined the model
@@ -108,12 +105,12 @@ def main(unused_argv):
                                                         num_epochs=None, 
                                                         shuffle=True) #shuffle the data
     MCdropout.train(input_fn=train_input_fn,
-                    steps=20000, #model will train for 20000 steps
+                    steps=4000, #model will train for 20000 steps
                     hooks=[logging_hook]) #specify the logging hook.
     # Evaluate the model and print results
     eval_input_fn = tf.estimator.inputs.numpy_input_fn(x={"x": eval_data},
                                                        y=eval_labels,
-                                                       num_epochs=20, #since we only do 1 forward run. 
+                                                       num_epochs=20, 
                                                        shuffle=False)
     eval_results = MCdropout.evaluate(input_fn=eval_input_fn)
     print(eval_results)
