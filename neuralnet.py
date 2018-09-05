@@ -1,5 +1,7 @@
 import numpy as np
 import tensorflow as tf
+import pandas as pd
+from scipy.spatial.distance import squareform
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
@@ -7,7 +9,7 @@ def DropNet(features, labels, mode):
 #This function defines our CNN structure.
 
     # Input 
-    X = tf.reshape(features["X"], [-1, 102, 102, 3]) #batchsize, width, height, channels.
+    X = tf.reshape(features["x"], [-1, 102, 102, 3]) #batchsize, width, height, channels.
 
     # Convolutional 
     conv1 = tf.layers.conv2d(inputs=X, 
@@ -16,9 +18,8 @@ def DropNet(features, labels, mode):
                              padding="same", 
                              activation=tf.nn.relu) # Same size, because no stride and padding same
     dropout1 = tf.layers.dropout(inputs=conv1, rate=0.5, training=True) #dropout layer
-    pool1 = tf.nn.pool(inputs=dropout1, pool_size=[1, 3, 3, 1], strides=[1, 3, 3, 1], 
-                       pooling_type="AVG" ) #avgpool layer
-    #output size now [batch size, 34, 34, 20*3?] 
+    pool1 = tf.nn.avg_pool(dropout1, [1, 3, 3, 1], [1, 3, 3, 1], "VALID" ) #avgpool layer
+    #output size now [batch size, 34, 34, 20] 
 
     # Convolutional Layer #2 and Pooling Layer #2
     conv2 = tf.layers.conv2d(inputs=pool1,
@@ -26,19 +27,18 @@ def DropNet(features, labels, mode):
                              kernel_size=[5, 5],
                              padding="same",
                              activation=tf.nn.relu)
-    #output size: [batch size, 34, 34, 10*3?]
+    #output size: [batch size, 34, 34, 10]
     dropout2 = tf.layers.dropout(inputs=conv2, rate=0.5, training=True)
-    pool2 = tf.nn.pool(inputs=dropout2, pool_size=[1, 2, 2, 1], strides=[1, 2, 2, 1], 
-                       pooling_type="AVG" )
-    #output size [batch size, 17, 17, 10*3?]
+    pool2 = tf.nn.avg_pool(dropout2, [1, 2, 2, 1], [1, 2, 2, 1], "VALID" )
+    #output size [batch size, 17, 17, 10]
 
     # Dense Layer
-    pool2_flat = tf.reshape(pool2, [-1, 17*17*30])
+    pool2_flat = tf.reshape(pool2, [-1, 17*17*10])
     dense1 = tf.layers.dense(inputs=pool2_flat, units=100, activation=tf.nn.relu) #this is our fully connected layer
     
-    dropout3 = tf.layers.dropout(inputs=dense, rate=0.5, training=True) 
+    dropout3 = tf.layers.dropout(inputs=dense1, rate=0.5, training=True) 
     dense2 = tf.layers.dense(inputs=dropout3, units=20, activation=tf.nn.relu) #this is our fully connected layer
-    dropout4 = tf.layers.dropout(inputs=dense, rate=0.5, training=True) 
+    dropout4 = tf.layers.dropout(inputs=dense2, rate=0.5, training=True) 
     # Logits Layer
     logits = tf.layers.dense(inputs=dropout4, units=2) 
 
@@ -73,11 +73,11 @@ def DropNet(features, labels, mode):
 def main(unused_argv):
 	  # Load training and eval data
 	#--------------------------------------------------------
-	data = pd.read_csv('meg_mci.csv')
+    data = pd.read_csv('meg_mci.csv')
     target = data['class'].map({2:0, 1:1}).values
     data = data.iloc[:, 2:-3]
     train_set = []
-    for i in tqdm(data.index):
+    for i in data.index:
         image = []
         for f in ['mean', 'cov', 'std']:
             cov = data.loc[i, [c for c in data if f in c]]
@@ -89,34 +89,34 @@ def main(unused_argv):
     train_set = np.concatenate(train_set, axis=3)
     train_set = np.transpose(train_set, axes=[3, 0, 1, 2])
     train_data = train_set[:60, :, :, :]
-	train_labels = np.asarray(target[:60], dtype=np.int32)
-	eval_data = train_set[60:, :, :, :] # np.array
-	eval_labels = np.asarray(target[60:], dtype=np.int32)
+    train_labels = np.asarray(target[:60], dtype=np.int32)
+    eval_data = train_set[60:, :, :, :] # np.array
+    eval_labels = np.asarray(target[60:], dtype=np.int32)
 	#--------------------------------------------------------
 
-	#Create estimator:
+    #Create estimator:
     print('Done')
-	MCdropout = tf.estimator.Estimator(model_fn=DropNet, 
+    MCdropout = tf.estimator.Estimator(model_fn=DropNet, 
                                         model_dir="meg/")
-	# Set up logging for predictions
-	tensors_to_log = {"probabilities": "softmax_tensor"}
-	logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=50)
-	#train the model
-	train_input_fn = tf.estimator.inputs.numpy_input_fn(x={"x": train_data}, #training features
+    # Set up logging for predictions
+    tensors_to_log = {"probabilities": "softmax_tensor"}
+    logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=50)
+    #train the model
+    train_input_fn = tf.estimator.inputs.numpy_input_fn(x={"x": train_data}, #training features
                                                         y=train_labels, #training labels
                                                         batch_size=5, 
                                                         num_epochs=None, 
                                                         shuffle=True) #shuffle the data
-	MCdropout.train(input_fn=train_input_fn,
+    MCdropout.train(input_fn=train_input_fn,
                     steps=20000, #model will train for 20000 steps
                     hooks=[logging_hook]) #specify the logging hook.
-	# Evaluate the model and print results
-	eval_input_fn = tf.estimator.inputs.numpy_input_fn(x={"x": eval_data},
+    # Evaluate the model and print results
+    eval_input_fn = tf.estimator.inputs.numpy_input_fn(x={"x": eval_data},
                                                        y=eval_labels,
                                                        num_epochs=20, #since we only do 1 forward run. 
                                                        shuffle=False)
-	eval_results = MCdropout.evaluate(input_fn=eval_input_fn)
-	print(eval_results)
+    eval_results = MCdropout.evaluate(input_fn=eval_input_fn)
+    print(eval_results)
 
 if __name__ == "__main__":
     tf.app.run()
